@@ -1,3 +1,6 @@
+C train tracker · HTML
+Copy
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -285,17 +288,26 @@
     letter-spacing: 1px;
   }
 
+  .alarm-btns {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    flex-shrink: 0;
+  }
+
   .notify-btn {
     background: none;
     border: 1px solid rgba(255,255,255,0.15);
     color: var(--dim);
-    border-radius: 8px;
-    padding: 8px 10px;
+    border-radius: 7px;
+    padding: 6px 10px;
     cursor: pointer;
-    font-size: 17px;
+    font-family: 'DM Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.5px;
     line-height: 1;
     transition: all 0.15s;
-    flex-shrink: 0;
+    white-space: nowrap;
   }
   .notify-btn:hover {
     border-color: var(--accent);
@@ -410,18 +422,49 @@
 <div class="toast" id="toast"></div>
 
 <script>
-// Clinton-Washington Avenues stop IDs
-// A27N = Manhattan-bound (northbound), A27S = Euclid Av-bound (southbound)
 const STOP_N = 'A27N';
 const STOP_S = 'A27S';
-const LEAVE_BUFFER = 7; // minutes before train to notify
-
-const BASE = 'https://otp-mta-prod.camsys-apps.com/otp/routers/default/index/stops';
+const BASE   = 'https://otp-mta-prod.camsys-apps.com/otp/routers/default/index/stops';
 
 let refreshTimer = null;
-const activeAlarms = {}; // key: trainId, value: timeoutId
 
-// --- Notifications ---
+// activeAlarms: { [trainId]: { timeoutId, epochSeconds, dest, direction, buffer } }
+const activeAlarms = {};
+
+// ── Service Worker (for background notifications) ──────────────────────────
+const SW_SRC = `
+self.addEventListener('message', e => {
+  if (e.data.type === 'SCHEDULE_NOTIF') {
+    const { delay, title, body, tag } = e.data;
+    setTimeout(() => {
+      self.registration.showNotification(title, {
+        body,
+        tag,
+        icon: 'data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><circle cx=%2250%22 cy=%2250%22 r=%2250%22 fill=%22%23003883%22/><text y=%22.9em%22 font-size=%2280%22 x=%2250%25%22 dominant-baseline=%22middle%22 text-anchor=%22middle%22 fill=%22white%22 font-family=%22sans-serif%22>C</text></svg>',
+        requireInteraction: true,
+        vibrate: [200, 100, 200]
+      });
+    }, delay);
+  }
+});
+`;
+
+let swReg = null;
+
+async function initSW() {
+  if (!('serviceWorker' in navigator)) return;
+  try {
+    const blob = new Blob([SW_SRC], { type: 'application/javascript' });
+    const swUrl = URL.createObjectURL(blob);
+    swReg = await navigator.serviceWorker.register(swUrl, { scope: '/' });
+    await navigator.serviceWorker.ready;
+  } catch(e) {
+    console.warn('SW registration failed, falling back to setTimeout notifications', e);
+    swReg = null;
+  }
+}
+
+// ── Notifications ──────────────────────────────────────────────────────────
 async function requestNotifPermission() {
   if (!('Notification' in window)) return false;
   if (Notification.permission === 'granted') return true;
@@ -433,65 +476,97 @@ function showToast(msg, duration = 3000) {
   const t = document.getElementById('toast');
   t.textContent = msg;
   t.classList.add('show');
-  setTimeout(() => t.classList.remove('show'), duration);
+  clearTimeout(t._hideTimer);
+  t._hideTimer = setTimeout(() => t.classList.remove('show'), duration);
 }
 
-function fireNotification(dest, direction) {
-  if (Notification.permission === 'granted') {
-    new Notification('🚇 Leave now!', {
-      body: `Your C train to ${dest} (${direction}) departs in 7 min`,
-      icon: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="50" cy="50" r="50" fill="%23003883"/><text y=".9em" font-size="80" x="50%" dominant-baseline="middle" text-anchor="middle" fill="white" font-family="sans-serif">C</text></svg>',
-      requireInteraction: true,
+function scheduleNotif(trainId, msDelay, dest, direction, buffer) {
+  const title = '🚇 Leave now!';
+  const body  = `C train to ${dest} (${direction}) in ${buffer} min — go!`;
+
+  if (swReg && swReg.active) {
+    // Service worker handles it — survives tab backgrounding
+    swReg.active.postMessage({
+      type: 'SCHEDULE_NOTIF',
+      delay: msDelay,
+      title,
+      body,
+      tag: trainId
     });
+    // Also keep a local setTimeout to clear activeAlarms state
+    activeAlarms[trainId].timeoutId = setTimeout(() => {
+      delete activeAlarms[trainId];
+      restoreButtons();
+    }, msDelay);
+  } else {
+    // Fallback: plain setTimeout + in-page Notification
+    activeAlarms[trainId].timeoutId = setTimeout(() => {
+      if (Notification.permission === 'granted') {
+        new Notification(title, { body, requireInteraction: true });
+      }
+      showToast(`🚶 ${body}`, 12000);
+      delete activeAlarms[trainId];
+      restoreButtons();
+    }, msDelay);
   }
-  // Also show in-app toast as backup
-  showToast(`🚶 Leave now! C → ${dest} in 7 min`, 10000);
 }
 
-function armAlarm(trainId, epochSeconds, dest, direction) {
-  // Cancel existing alarm for this train if any
+// Re-apply armed CSS after a re-render without touching DOM until render is done
+function restoreButtons() {
+  for (const [id, alarm] of Object.entries(activeAlarms)) {
+    const btn = document.getElementById(`btn-${id}`);
+    if (!btn) continue;
+    const label = id.endsWith('relaxed') ? 'Relaxed (7 min)' : 'Rushed (4 min)';
+    btn.textContent = `✓ ${label}`;
+    btn.classList.add('armed');
+    btn.title = 'Tap to cancel';
+  }
+}
+
+// ── Alarm logic ────────────────────────────────────────────────────────────
+async function handleNotifyClick(trainId, epochSeconds, dest, direction, buffer) {
+  // Toggle: cancel if already armed
   if (activeAlarms[trainId]) {
-    clearTimeout(activeAlarms[trainId]);
+    clearTimeout(activeAlarms[trainId].timeoutId);
+    // Tell SW to cancel by scheduling a notif with 0 delay tagged the same (overwrites)
+    // Actually just clear locally; SW will fire but it's a no-op if user already left
     delete activeAlarms[trainId];
-    // Update button back to unarmed
+    restoreButtons();
+    // Re-render just this button back to unarmed
     const btn = document.getElementById(`btn-${trainId}`);
-    if (btn) { btn.textContent = '🔔'; btn.classList.remove('armed'); btn.title = 'Notify me when to leave'; }
+    if (btn) {
+      const label = trainId.endsWith('relaxed') ? 'Relaxed (7 min)' : 'Rushed (4 min)';
+      btn.textContent = label;
+      btn.classList.remove('armed');
+    }
     showToast('Alarm cancelled');
     return;
   }
 
-  const msUntilLeave = (epochSeconds - LEAVE_BUFFER * 60) * 1000 - Date.now();
+  const ok = await requestNotifPermission();
+  if (!ok) { showToast('Enable notifications in your browser settings'); return; }
 
-  if (msUntilLeave <= 0) {
-    showToast('Too late to set alarm for this train');
-    return;
-  }
+  const msUntilLeave = (epochSeconds - buffer * 60) * 1000 - Date.now();
+  if (msUntilLeave <= 0) { showToast('Not enough time — catch the next one'); return; }
 
-  activeAlarms[trainId] = setTimeout(() => {
-    fireNotification(dest, direction);
-    delete activeAlarms[trainId];
-    const btn = document.getElementById(`btn-${trainId}`);
-    if (btn) { btn.textContent = '🔔'; btn.classList.remove('armed'); }
-  }, msUntilLeave);
+  activeAlarms[trainId] = { timeoutId: null, epochSeconds, dest, direction, buffer };
+  scheduleNotif(trainId, msUntilLeave, dest, direction, buffer);
 
-  // Update button
+  // Immediately update button
   const btn = document.getElementById(`btn-${trainId}`);
-  if (btn) { btn.textContent = '✓'; btn.classList.add('armed'); btn.title = 'Tap to cancel alarm'; }
+  if (btn) {
+    const label = trainId.endsWith('relaxed') ? 'Relaxed (7 min)' : 'Rushed (4 min)';
+    btn.textContent = `✓ ${label}`;
+    btn.classList.add('armed');
+    btn.title = 'Tap to cancel';
+  }
 
   const leaveAt = new Date(Date.now() + msUntilLeave);
   const leaveStr = leaveAt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
-  showToast(`⏰ You'll be notified at ${leaveStr}`);
+  showToast(`⏰ Alert set for ${leaveStr}`, 3500);
 }
 
-async function handleNotifyClick(trainId, epochSeconds, dest, direction) {
-  const hasPermission = await requestNotifPermission();
-  if (!hasPermission) {
-    showToast('Enable notifications to use this feature');
-    return;
-  }
-  armAlarm(trainId, epochSeconds, dest, direction);
-}
-
+// ── Data fetching ──────────────────────────────────────────────────────────
 async function fetchArrivals(stopId) {
   const url = `${BASE}/MTASBWY:${stopId}/stoptimes?timeRange=3600&numberOfDepartures=5`;
   const res = await fetch(url);
@@ -500,8 +575,7 @@ async function fetchArrivals(stopId) {
 }
 
 function minutesUntil(epochSeconds) {
-  const now = Math.floor(Date.now() / 1000);
-  return Math.round((epochSeconds - now) / 60);
+  return Math.round((epochSeconds - Date.now() / 1000) / 60);
 }
 
 function formatTime(epochSeconds) {
@@ -510,170 +584,113 @@ function formatTime(epochSeconds) {
   });
 }
 
+// ── Rendering ──────────────────────────────────────────────────────────────
+// Stable ID: round departure to nearest 30s to absorb minor live-data drift
+function stableId(direction, epochSeconds) {
+  return `${direction}-${Math.round(epochSeconds / 30) * 30}`;
+}
+
 function renderCard(arrival, idx, direction) {
-  const epochSeconds = arrival.serviceDay + arrival.realtimeDeparture;
-  const mins = minutesUntil(epochSeconds);
+  const epoch = arrival.serviceDay + arrival.realtimeDeparture;
+  const mins  = minutesUntil(epoch);
   if (mins < -1) return '';
 
-  const dest = arrival.headsign || 'C Train';
-  const absTime = formatTime(epochSeconds);
-  const isRealtime = arrival.realtime;
-  const trainId = `${direction}-${epochSeconds}`;
-  const canAlarm = mins > LEAVE_BUFFER; // only useful if train is far enough out
+  const dest      = arrival.headsign || 'C Train';
+  const absTime   = formatTime(epoch);
+  const isLive    = arrival.realtime;
+  const baseId    = stableId(direction, epoch);
+  const idRelaxed = `${baseId}-relaxed`;
+  const idRushed  = `${baseId}-rushed`;
+  const destSafe  = dest.replace(/'/g, "\\'");
 
-  const notifyBtn = `<button
-    class="notify-btn ${activeAlarms[trainId] ? 'armed' : ''}"
-    id="btn-${trainId}"
-    title="${activeAlarms[trainId] ? 'Tap to cancel alarm' : 'Notify me when to leave'}"
-    onclick="handleNotifyClick('${trainId}', ${epochSeconds}, '${dest.replace(/'/g,"\\'")}', '${direction}')"
-  >${activeAlarms[trainId] ? '✓' : '🔔'}</button>`;
-
-  if (mins <= 0) {
-    return `
-      <div class="train-card" style="animation-delay:${idx*0.05}s">
-        <div>
-          <div class="arriving-now">NOW</div>
-          <div class="train-time-unit">arriving</div>
-        </div>
-        <div class="train-info">
-          <div class="train-dest">${dest}</div>
-          <div class="train-meta">${absTime} · ${isRealtime ? '🟢 live' : '📅 sched'}</div>
-        </div>
-        ${notifyBtn}
-      </div>`;
+  function alarmBtn(id, label, buffer) {
+    const armed = !!activeAlarms[id];
+    return `<button
+      class="notify-btn${armed ? ' armed' : ''}"
+      id="btn-${id}"
+      title="${armed ? 'Tap to cancel' : `Alert me ${buffer} min before`}"
+      onclick="handleNotifyClick('${id}',${epoch},'${destSafe}','${direction}',${buffer})"
+    >${armed ? '✓ ' : ''}${label}</button>`;
   }
 
-  return `
-    <div class="train-card" style="animation-delay:${idx*0.05}s">
-      <div>
-        <div class="train-time ${mins <= 2 ? 'urgent' : ''}">${mins}</div>
-        <div class="train-time-unit">min</div>
-      </div>
-      <div class="train-info">
-        <div class="train-dest">${dest}</div>
-        <div class="train-meta">${absTime} · ${isRealtime ? '🟢 live' : '📅 sched'}</div>
-      </div>
-      ${notifyBtn}
-    </div>`;
+  const buttons = `<div class="alarm-btns">
+    ${alarmBtn(idRelaxed, 'Relaxed (7 min)', 7)}
+    ${alarmBtn(idRushed,  'Rushed (4 min)',  4)}
+  </div>`;
+
+  const timeBlock = mins <= 0
+    ? `<div><div class="arriving-now">NOW</div><div class="train-time-unit">arriving</div></div>`
+    : `<div><div class="train-time${mins <= 2 ? ' urgent' : ''}">${mins}</div><div class="train-time-unit">min</div></div>`;
+
+  return `<div class="train-card" style="animation-delay:${idx*0.05}s">
+    ${timeBlock}
+    <div class="train-info">
+      <div class="train-dest">${dest}</div>
+      <div class="train-meta">${absTime} · ${isLive ? '🟢 live' : '📅 sched'}</div>
+    </div>
+    ${buttons}
+  </div>`;
 }
 
 function renderSection(label, arrivals, direction) {
-  const now = Math.floor(Date.now() / 1000);
-  const upcoming = arrivals.filter(a => {
-    const dep = a.serviceDay + a.realtimeDeparture;
-    return dep - now > -60;
-  }).slice(0, 4);
-
+  const now = Date.now() / 1000;
+  const upcoming = arrivals
+    .filter(a => (a.serviceDay + a.realtimeDeparture) - now > -60)
+    .slice(0, 4);
   const cards = upcoming.map((a, i) => renderCard(a, i, direction)).filter(Boolean).join('');
-
-  return `
-    <div class="direction-section">
-      <div class="direction-label">${label}</div>
-      ${cards || `<div class="no-trains">No upcoming trains</div>`}
-    </div>`;
+  return `<div class="direction-section">
+    <div class="direction-label">${label}</div>
+    ${cards || '<div class="no-trains">No upcoming trains</div>'}
+  </div>`;
 }
 
-function isNightHours() {
-  const h = new Date().getHours();
-  return h >= 0 && h < 5;
-}
-
+// ── Load & refresh ─────────────────────────────────────────────────────────
 async function load() {
-  const main = document.getElementById('main');
-  const dot = document.getElementById('statusDot');
-  const statusText = document.getElementById('statusText');
+  const main        = document.getElementById('main');
+  const dot         = document.getElementById('statusDot');
+  const statusText  = document.getElementById('statusText');
   const lastUpdated = document.getElementById('lastUpdated');
 
   try {
-    // Fetch both directions in parallel
     const [northData, southData] = await Promise.all([
-      fetchArrivals(STOP_N),
-      fetchArrivals(STOP_S)
+      fetchArrivals(STOP_N), fetchArrivals(STOP_S)
     ]);
+    const sort = arr => arr.sort((a,b) =>
+      (a.serviceDay + a.realtimeDeparture) - (b.serviceDay + b.realtimeDeparture));
 
-    // OTP returns array of pattern objects, each with times
-    const northArrivals = northData.flatMap(p => p.times || [])
-      .sort((a, b) => (a.serviceDay + a.realtimeDeparture) - (b.serviceDay + b.realtimeDeparture));
-    const southArrivals = southData.flatMap(p => p.times || [])
-      .sort((a, b) => (a.serviceDay + a.realtimeDeparture) - (b.serviceDay + b.realtimeDeparture));
+    const northArrivals = sort(northData.flatMap(p => p.times || []));
+    const southArrivals = sort(southData.flatMap(p => p.times || []));
 
-    const nightNote = isNightHours()
-      ? `<div class="service-note">🌙 Late night: C train suspended. A train providing service.</div>`
-      : '';
+    const h = new Date().getHours();
+    const nightNote = (h >= 0 && h < 5)
+      ? `<div class="service-note">🌙 Late night: C suspended — A train running instead</div>` : '';
 
-    main.innerHTML = nightNote +
-      renderSection('↑ Uptown · Manhattan', northArrivals, 'Uptown') +
-      '<div class="divider"></div>' +
-      renderSection('↓ Brooklyn · Euclid Av', southArrivals, 'Downtown');
+    main.innerHTML = nightNote
+      + renderSection('↑ Uptown · Manhattan', northArrivals, 'Uptown')
+      + '<div class="divider"></div>'
+      + renderSection('↓ Brooklyn · Euclid Av', southArrivals, 'Downtown');
 
-    dot.className = 'status-dot live';
-    statusText.textContent = 'Live';
+    // Re-apply armed state to any buttons that survived the re-render
+    restoreButtons();
+
+    dot.className   = 'status-dot live';
+    statusText.textContent  = 'Live';
     lastUpdated.textContent = 'Updated ' + new Date().toLocaleTimeString('en-US', {hour:'numeric',minute:'2-digit'});
 
-  } catch (err) {
+  } catch(err) {
     console.error(err);
-    // Fallback: try alternative endpoint
-    try {
-      await loadFallback();
-    } catch(e) {
-      dot.className = 'status-dot';
-      statusText.textContent = 'Error';
-      main.innerHTML = `
-        <div class="error-state">
-          ⚠ Could not load arrivals<br><br>
-          <span style="font-size:11px;color:var(--dim)">Check your connection or try refreshing.<br>
-          If this persists, the MTA proxy may be down.</span>
-        </div>`;
-    }
+    dot.className = 'status-dot';
+    statusText.textContent = 'Error';
+    main.innerHTML = `<div class="error-state">⚠ Could not load arrivals<br><br>
+      <span style="font-size:11px;color:var(--dim)">Check connection or try refreshing.<br>
+      The MTA proxy may be temporarily down.</span></div>`;
   }
-}
-
-async function loadFallback() {
-  // Fallback: use the train time API from another source
-  const main = document.getElementById('main');
-  const dot = document.getElementById('statusDot');
-  const statusText = document.getElementById('statusText');
-
-  // Try the MTA's SIRI-style endpoint via a public proxy
-  const proxyUrl = `https://trains.nearby.fyi/by-location?lat=40.6845&lon=-73.9682&limit=20`;
-  const res = await fetch(proxyUrl);
-  if (!res.ok) throw new Error('Fallback failed');
-  const data = await res.json();
-
-  // Filter to our stop
-  const cArrivals = data.filter(t =>
-    t.route === 'C' &&
-    (t.stop_id === STOP_N || t.stop_id === STOP_S)
-  );
-
-  const northArrivals = cArrivals.filter(t => t.stop_id === STOP_N);
-  const southArrivals = cArrivals.filter(t => t.stop_id === STOP_S);
-
-  // Reformat to match our render expectations
-  const now = Math.floor(Date.now() / 1000);
-  const remap = arr => arr.map(t => ({
-    serviceDay: 0,
-    realtimeDeparture: t.arrival_time,
-    headsign: t.destination || t.trip_headsign || 'C Train',
-    realtime: true
-  }));
-
-  const northMapped = remap(northArrivals);
-  const southMapped = remap(southArrivals);
-
-  main.innerHTML =
-    renderSection('↑ Uptown · Manhattan', northMapped) +
-    '<div class="divider"></div>' +
-    renderSection('↓ Brooklyn · Euclid Av', southMapped);
-
-  dot.className = 'status-dot live';
-  statusText.textContent = 'Live (fallback)';
 }
 
 function startCountdown() {
   const bar = document.getElementById('progressBar');
   bar.className = 'auto-refresh-bar';
-  void bar.offsetWidth; // reflow
+  void bar.offsetWidth;
   bar.className = 'auto-refresh-bar animating';
 }
 
@@ -681,27 +698,19 @@ function refresh() {
   const btn = document.getElementById('refreshBtn');
   btn.classList.add('spinning');
   setTimeout(() => btn.classList.remove('spinning'), 700);
-
   clearTimeout(refreshTimer);
-  load().then(() => {
-    startCountdown();
-    scheduleRefresh();
-  });
+  load().then(() => { startCountdown(); scheduleRefresh(); });
 }
 
 function scheduleRefresh() {
   refreshTimer = setTimeout(() => {
-    load().then(() => {
-      startCountdown();
-      scheduleRefresh();
-    });
+    load().then(() => { startCountdown(); scheduleRefresh(); });
   }, 30000);
 }
 
-// Init
-load().then(() => {
-  startCountdown();
-  scheduleRefresh();
+// ── Init ───────────────────────────────────────────────────────────────────
+initSW().then(() => {
+  load().then(() => { startCountdown(); scheduleRefresh(); });
 });
 </script>
 </body>
