@@ -1,6 +1,3 @@
-C train tracker · HTML
-Copy
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -585,22 +582,20 @@ function formatTime(epochSeconds) {
 }
 
 // ── Rendering ──────────────────────────────────────────────────────────────
-// Stable ID: round departure to nearest 30s to absorb minor live-data drift
-function stableId(direction, epochSeconds) {
-  return `${direction}-${Math.round(epochSeconds / 30) * 30}`;
-}
-
 function renderCard(arrival, idx, direction) {
   const epoch = arrival.serviceDay + arrival.realtimeDeparture;
   const mins  = minutesUntil(epoch);
   if (mins < -1) return '';
 
-  const dest      = arrival.headsign || 'C Train';
-  const absTime   = formatTime(epoch);
-  const isLive    = arrival.realtime;
-  const baseId    = stableId(direction, epoch);
-  const idRelaxed = `${baseId}-relaxed`;
-  const idRushed  = `${baseId}-rushed`;
+  const dest    = arrival.headsign || 'C Train';
+  const absTime = formatTime(epoch);
+  const isLive  = arrival.realtime;
+
+  // tripId is stable across refreshes — the MTA assigns it per trip run.
+  // Fall back to a scheduled-minute bucket only if tripId is missing.
+  const tripKey   = (arrival.tripId || `${direction}-${Math.floor(epoch/60)}`).replace(/[^a-zA-Z0-9_-]/g, '_');
+  const idRelaxed = `${tripKey}-relaxed`;
+  const idRushed  = `${tripKey}-rushed`;
   const destSafe  = dest.replace(/'/g, "\\'");
 
   function alarmBtn(id, label, buffer) {
