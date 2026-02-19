@@ -285,6 +285,58 @@
     letter-spacing: 1px;
   }
 
+  .notify-btn {
+    background: none;
+    border: 1px solid rgba(255,255,255,0.15);
+    color: var(--dim);
+    border-radius: 8px;
+    padding: 8px 10px;
+    cursor: pointer;
+    font-size: 17px;
+    line-height: 1;
+    transition: all 0.15s;
+    flex-shrink: 0;
+  }
+  .notify-btn:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: rgba(91,140,255,0.08);
+  }
+  .notify-btn.armed {
+    border-color: var(--green);
+    color: var(--green);
+    background: rgba(74,222,128,0.08);
+    animation: armPulse 2s ease-in-out infinite;
+  }
+  .notify-btn.armed:hover {
+    border-color: #f87171;
+    color: #f87171;
+    background: rgba(248,113,113,0.08);
+    animation: none;
+  }
+  @keyframes armPulse { 0%,100% { opacity:1; } 50% { opacity:0.6; } }
+
+  .toast {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%) translateY(80px);
+    background: var(--platform);
+    border: 1px solid rgba(255,255,255,0.12);
+    color: var(--text);
+    padding: 12px 20px;
+    border-radius: 10px;
+    font-size: 12px;
+    letter-spacing: 0.5px;
+    white-space: nowrap;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+    transition: transform 0.3s ease;
+    z-index: 100;
+  }
+  .toast.show {
+    transform: translateX(-50%) translateY(0);
+  }
+
   .footer {
     position: relative;
     z-index: 1;
@@ -355,37 +407,90 @@
 </footer>
 
 <div class="auto-refresh-bar" id="progressBar"></div>
+<div class="toast" id="toast"></div>
 
 <script>
 // Clinton-Washington Avenues stop IDs
 // A27N = Manhattan-bound (northbound), A27S = Euclid Av-bound (southbound)
 const STOP_N = 'A27N';
 const STOP_S = 'A27S';
-
-// The MTA ACE+BDFM feed endpoint (no API key needed as of v2)
-// We use the mtadeveloper proxy that returns JSON-decoded GTFS-RT
-// Alternatively: use the direct MTA feed via a CORS proxy
-const MTA_FEED_URL = 'https://api-endpoint.mta.info/Dataservice/mtagtfsfeeds/nyct%2Fgtfs-ace';
-
-// Since browsers can't directly call the MTA protobuf feed due to CORS + binary format,
-// we use the transit.land or train-time public JSON APIs
-// Best free option: use the MTA's own SIRI REST endpoint (subway is not SIRI, but we can use
-// the unofficial subway time API at https://traintime.lirr.org style, or we use
-// a simple workaround: the public subway-time.meteors.io proxy
-
-// Actually the cleanest free option for ACE is the community proxy at:
-// https://subway-time.stevenskelton.ca/
-
-// We'll use the mtadata.io approach or the direct simplified JSON proxy
-// The most reliable free option: https://queuing.kentik.com (nope)
-
-// BEST APPROACH: Use the MTA's unofficial JSON wrapper
-// https://otp-mta-prod.camsys-apps.com/otp/routers/default/index/stops/MTASBWY:A27N/stoptimes
+const LEAVE_BUFFER = 7; // minutes before train to notify
 
 const BASE = 'https://otp-mta-prod.camsys-apps.com/otp/routers/default/index/stops';
 
 let refreshTimer = null;
-let countdownInterval = null;
+const activeAlarms = {}; // key: trainId, value: timeoutId
+
+// --- Notifications ---
+async function requestNotifPermission() {
+  if (!('Notification' in window)) return false;
+  if (Notification.permission === 'granted') return true;
+  const result = await Notification.requestPermission();
+  return result === 'granted';
+}
+
+function showToast(msg, duration = 3000) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), duration);
+}
+
+function fireNotification(dest, direction) {
+  if (Notification.permission === 'granted') {
+    new Notification('🚇 Leave now!', {
+      body: `Your C train to ${dest} (${direction}) departs in 7 min`,
+      icon: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="50" cy="50" r="50" fill="%23003883"/><text y=".9em" font-size="80" x="50%" dominant-baseline="middle" text-anchor="middle" fill="white" font-family="sans-serif">C</text></svg>',
+      requireInteraction: true,
+    });
+  }
+  // Also show in-app toast as backup
+  showToast(`🚶 Leave now! C → ${dest} in 7 min`, 10000);
+}
+
+function armAlarm(trainId, epochSeconds, dest, direction) {
+  // Cancel existing alarm for this train if any
+  if (activeAlarms[trainId]) {
+    clearTimeout(activeAlarms[trainId]);
+    delete activeAlarms[trainId];
+    // Update button back to unarmed
+    const btn = document.getElementById(`btn-${trainId}`);
+    if (btn) { btn.textContent = '🔔'; btn.classList.remove('armed'); btn.title = 'Notify me when to leave'; }
+    showToast('Alarm cancelled');
+    return;
+  }
+
+  const msUntilLeave = (epochSeconds - LEAVE_BUFFER * 60) * 1000 - Date.now();
+
+  if (msUntilLeave <= 0) {
+    showToast('Too late to set alarm for this train');
+    return;
+  }
+
+  activeAlarms[trainId] = setTimeout(() => {
+    fireNotification(dest, direction);
+    delete activeAlarms[trainId];
+    const btn = document.getElementById(`btn-${trainId}`);
+    if (btn) { btn.textContent = '🔔'; btn.classList.remove('armed'); }
+  }, msUntilLeave);
+
+  // Update button
+  const btn = document.getElementById(`btn-${trainId}`);
+  if (btn) { btn.textContent = '✓'; btn.classList.add('armed'); btn.title = 'Tap to cancel alarm'; }
+
+  const leaveAt = new Date(Date.now() + msUntilLeave);
+  const leaveStr = leaveAt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  showToast(`⏰ You'll be notified at ${leaveStr}`);
+}
+
+async function handleNotifyClick(trainId, epochSeconds, dest, direction) {
+  const hasPermission = await requestNotifPermission();
+  if (!hasPermission) {
+    showToast('Enable notifications to use this feature');
+    return;
+  }
+  armAlarm(trainId, epochSeconds, dest, direction);
+}
 
 async function fetchArrivals(stopId) {
   const url = `${BASE}/MTASBWY:${stopId}/stoptimes?timeRange=3600&numberOfDepartures=5`;
@@ -405,15 +510,24 @@ function formatTime(epochSeconds) {
   });
 }
 
-function renderCard(arrival, idx) {
-  const mins = minutesUntil(arrival.serviceDay + arrival.realtimeDeparture);
-  if (mins < -1) return ''; // already gone
+function renderCard(arrival, idx, direction) {
+  const epochSeconds = arrival.serviceDay + arrival.realtimeDeparture;
+  const mins = minutesUntil(epochSeconds);
+  if (mins < -1) return '';
 
-  const dest = arrival.headsign || 'Unknown';
-  const absTime = formatTime(arrival.serviceDay + arrival.realtimeDeparture);
+  const dest = arrival.headsign || 'C Train';
+  const absTime = formatTime(epochSeconds);
   const isRealtime = arrival.realtime;
+  const trainId = `${direction}-${epochSeconds}`;
+  const canAlarm = mins > LEAVE_BUFFER; // only useful if train is far enough out
 
-  let timeDisplay, timeUnit;
+  const notifyBtn = `<button
+    class="notify-btn ${activeAlarms[trainId] ? 'armed' : ''}"
+    id="btn-${trainId}"
+    title="${activeAlarms[trainId] ? 'Tap to cancel alarm' : 'Notify me when to leave'}"
+    onclick="handleNotifyClick('${trainId}', ${epochSeconds}, '${dest.replace(/'/g,"\\'")}', '${direction}')"
+  >${activeAlarms[trainId] ? '✓' : '🔔'}</button>`;
+
   if (mins <= 0) {
     return `
       <div class="train-card" style="animation-delay:${idx*0.05}s">
@@ -423,8 +537,9 @@ function renderCard(arrival, idx) {
         </div>
         <div class="train-info">
           <div class="train-dest">${dest}</div>
-          <div class="train-meta">${absTime} · ${isRealtime ? 'live' : 'scheduled'}</div>
+          <div class="train-meta">${absTime} · ${isRealtime ? '🟢 live' : '📅 sched'}</div>
         </div>
+        ${notifyBtn}
       </div>`;
   }
 
@@ -438,17 +553,18 @@ function renderCard(arrival, idx) {
         <div class="train-dest">${dest}</div>
         <div class="train-meta">${absTime} · ${isRealtime ? '🟢 live' : '📅 sched'}</div>
       </div>
+      ${notifyBtn}
     </div>`;
 }
 
-function renderSection(label, arrivals) {
+function renderSection(label, arrivals, direction) {
   const now = Math.floor(Date.now() / 1000);
   const upcoming = arrivals.filter(a => {
     const dep = a.serviceDay + a.realtimeDeparture;
     return dep - now > -60;
   }).slice(0, 4);
 
-  const cards = upcoming.map((a, i) => renderCard(a, i)).filter(Boolean).join('');
+  const cards = upcoming.map((a, i) => renderCard(a, i, direction)).filter(Boolean).join('');
 
   return `
     <div class="direction-section">
@@ -486,9 +602,9 @@ async function load() {
       : '';
 
     main.innerHTML = nightNote +
-      renderSection('↑ Uptown · Manhattan', northArrivals) +
+      renderSection('↑ Uptown · Manhattan', northArrivals, 'Uptown') +
       '<div class="divider"></div>' +
-      renderSection('↓ Brooklyn · Euclid Av', southArrivals);
+      renderSection('↓ Brooklyn · Euclid Av', southArrivals, 'Downtown');
 
     dot.className = 'status-dot live';
     statusText.textContent = 'Live';
