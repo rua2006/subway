@@ -1,712 +1,1119 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
-<title>C Train · Clinton–Washington</title>
-<style>
-  @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Mono:wght@300;400;500&display=swap');
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SunSeeker — Find Your Light</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300&family=DM+Mono:wght@300;400&display=swap" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/suncalc@1.9.0/suncalc.js"></script>
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
 
-  :root {
-    --c-blue: #003883;
-    --c-blue-light: #0047b0;
-    --platform: #1a1a2e;
-    --tile: #0d0d1a;
-    --text: #e8e8f0;
-    --dim: #6b6b8a;
-    --accent: #5b8cff;
-    --warn: #ffb347;
-    --green: #4ade80;
-  }
+    :root {
+      --bg: #0c0c0d;
+      --glass: rgba(10, 10, 11, 0.78);
+      --glass-border: rgba(255, 255, 255, 0.07);
+      --text: #ede8df;
+      --muted: rgba(237, 232, 223, 0.38);
+      --accent-gold: #e8a020;
+      --accent-blue: #5b9ff5;
+      --accent-purple: #a07edb;
+    }
 
-  * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'DM Mono', monospace;
+      height: 100dvh;
+      overflow: hidden;
+    }
 
-  body {
-    background: var(--tile);
-    color: var(--text);
-    font-family: 'DM Mono', monospace;
-    min-height: 100dvh;
-    display: flex;
-    flex-direction: column;
-    overflow-x: hidden;
-  }
+    #map {
+      width: 100vw;
+      height: 100dvh;
+      position: absolute;
+      inset: 0;
+    }
 
-  /* Subway tile texture */
-  body::before {
-    content: '';
-    position: fixed;
-    inset: 0;
-    background-image:
-      linear-gradient(rgba(255,255,255,0.015) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(255,255,255,0.015) 1px, transparent 1px);
-    background-size: 40px 40px;
-    pointer-events: none;
-    z-index: 0;
-  }
+    /* ─── Overlay layout ───────────────────────────────── */
+    #ui {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 20;
+    }
 
-  .header {
-    position: relative;
-    z-index: 1;
-    background: var(--c-blue);
-    padding: 20px 24px 16px;
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    box-shadow: 0 4px 24px rgba(0,56,131,0.6);
-  }
+    /* ─── Header ────────────────────────────────────────── */
+    #header {
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      display: flex;
+      justify-content: center;
+      padding-top: 28px;
+    }
 
-  .bullet {
-    width: 52px;
-    height: 52px;
-    border-radius: 50%;
-    background: var(--c-blue-light);
-    border: 3px solid #fff;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-family: 'Bebas Neue', sans-serif;
-    font-size: 32px;
-    color: white;
-    letter-spacing: 0;
-    flex-shrink: 0;
-    box-shadow: 0 2px 12px rgba(0,0,0,0.4);
-  }
+    #header h1 {
+      font-family: 'Cormorant Garamond', serif;
+      font-weight: 300;
+      font-size: 20px;
+      letter-spacing: 0.32em;
+      text-transform: uppercase;
+      color: var(--text);
+      opacity: 0.85;
+    }
 
-  .header-text h1 {
-    font-family: 'Bebas Neue', sans-serif;
-    font-size: 22px;
-    letter-spacing: 2px;
-    color: white;
-    line-height: 1;
-  }
+    /* ─── Phase badge (top-left) ─────────────────────────── */
+    #phase-badge {
+      position: absolute;
+      top: 24px;
+      left: 24px;
+      pointer-events: none;
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      padding: 9px 15px;
+      border-radius: 9px;
+      font-size: 11px;
+      letter-spacing: 0.1em;
+      border: 1px solid transparent;
+      transition: all 0.6s ease;
+      opacity: 0;
+    }
 
-  .header-text p {
-    font-size: 11px;
-    color: rgba(255,255,255,0.65);
-    margin-top: 3px;
-    letter-spacing: 1px;
-    text-transform: uppercase;
-  }
+    #phase-badge.visible { opacity: 1; }
 
-  .refresh-btn {
-    margin-left: auto;
-    background: rgba(255,255,255,0.12);
-    border: 1px solid rgba(255,255,255,0.25);
-    color: white;
-    width: 38px;
-    height: 38px;
-    border-radius: 8px;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 18px;
-    transition: background 0.15s, transform 0.15s;
-    flex-shrink: 0;
-  }
-  .refresh-btn:hover { background: rgba(255,255,255,0.22); }
-  .refresh-btn.spinning { animation: spin 0.7s linear; }
-  @keyframes spin { to { transform: rotate(360deg); } }
+    #phase-badge.golden {
+      background: rgba(232, 160, 32, 0.13);
+      border-color: rgba(232, 160, 32, 0.35);
+      color: #f0bf55;
+    }
 
-  .status-bar {
-    position: relative;
-    z-index: 1;
-    background: var(--platform);
-    border-bottom: 1px solid rgba(255,255,255,0.06);
-    padding: 8px 24px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    font-size: 10px;
-    color: var(--dim);
-    letter-spacing: 0.5px;
-  }
+    #phase-badge.blue {
+      background: rgba(91, 159, 245, 0.11);
+      border-color: rgba(91, 159, 245, 0.32);
+      color: #8dbfff;
+    }
 
-  .status-dot {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: var(--dim);
-    display: inline-block;
-    margin-right: 6px;
-    transition: background 0.3s;
-  }
-  .status-dot.live { background: var(--green); box-shadow: 0 0 6px var(--green); animation: pulse 2s infinite; }
-  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
+    #phase-badge.civil {
+      background: rgba(160, 126, 219, 0.1);
+      border-color: rgba(160, 126, 219, 0.28);
+      color: #c0a0ff;
+    }
 
-  main {
-    position: relative;
-    z-index: 1;
-    flex: 1;
-    padding: 0 0 24px;
-  }
+    .badge-icon {
+      font-size: 14px;
+      line-height: 1;
+    }
 
-  .direction-section {
-    padding: 20px 24px 8px;
-  }
+    .badge-dot {
+      width: 5px; height: 5px;
+      border-radius: 50%;
+      background: currentColor;
+      animation: throb 2.4s ease-in-out infinite;
+      flex-shrink: 0;
+    }
 
-  .direction-label {
-    font-family: 'Bebas Neue', sans-serif;
-    font-size: 13px;
-    letter-spacing: 3px;
-    color: var(--dim);
-    text-transform: uppercase;
-    margin-bottom: 12px;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-  .direction-label::after {
-    content: '';
-    flex: 1;
-    height: 1px;
-    background: rgba(255,255,255,0.07);
-  }
+    @keyframes throb {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.25; transform: scale(0.7); }
+    }
 
-  .train-card {
-    background: var(--platform);
-    border: 1px solid rgba(255,255,255,0.07);
-    border-radius: 12px;
-    padding: 18px 20px;
-    margin-bottom: 10px;
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    position: relative;
-    overflow: hidden;
-    animation: slideIn 0.3s ease forwards;
-    opacity: 0;
-    transform: translateY(8px);
-  }
+    /* ─── Solar info panel (top-right) ──────────────────── */
+    #solar-panel {
+      position: absolute;
+      top: 24px; right: 24px;
+      pointer-events: none;
+      background: var(--glass);
+      border: 1px solid var(--glass-border);
+      backdrop-filter: blur(24px) saturate(1.2);
+      -webkit-backdrop-filter: blur(24px) saturate(1.2);
+      border-radius: 13px;
+      padding: 18px 20px;
+      width: 210px;
+    }
 
-  .train-card::before {
-    content: '';
-    position: absolute;
-    left: 0;
-    top: 0;
-    bottom: 0;
-    width: 3px;
-    background: var(--c-blue-light);
-    border-radius: 3px 0 0 3px;
-  }
+    .panel-label {
+      font-size: 8.5px;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 14px;
+    }
 
-  @keyframes slideIn {
-    to { opacity: 1; transform: translateY(0); }
-  }
+    .solar-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      padding: 4px 0;
+    }
 
-  .train-card:nth-child(2) { animation-delay: 0.05s; }
-  .train-card:nth-child(3) { animation-delay: 0.1s; }
-  .train-card:nth-child(4) { animation-delay: 0.15s; }
+    .solar-row + .solar-row {
+      border-top: 1px solid rgba(255,255,255,0.04);
+    }
 
-  .train-time {
-    font-family: 'Bebas Neue', sans-serif;
-    font-size: 44px;
-    color: var(--text);
-    line-height: 1;
-    min-width: 70px;
-    text-align: center;
-  }
+    .solar-key {
+      font-size: 9.5px;
+      color: var(--muted);
+      letter-spacing: 0.04em;
+    }
 
-  .train-time.urgent {
-    color: var(--warn);
-    animation: urgentPulse 1s ease-in-out infinite;
-  }
-  @keyframes urgentPulse { 0%,100% { opacity: 1; } 50% { opacity: 0.7; } }
+    .solar-val {
+      font-size: 12.5px;
+      color: var(--text);
+      transition: color 0.4s;
+    }
 
-  .train-time-unit {
-    font-size: 13px;
-    color: var(--dim);
-    margin-top: 2px;
-    letter-spacing: 1px;
-    text-align: center;
-  }
+    .sep {
+      height: 1px;
+      background: rgba(255,255,255,0.06);
+      margin: 10px 0;
+    }
 
-  .train-info {
-    flex: 1;
-  }
+    /* ─── Sun compass (right, above controls) ──────────────── */
+    #compass-wrap {
+      position: absolute;
+      bottom: 132px;
+      right: 24px;
+      pointer-events: all;
+      cursor: grab;
+      user-select: none;
+      -webkit-user-select: none;
+    }
 
-  .train-dest {
-    font-size: 14px;
-    font-weight: 500;
-    color: var(--text);
-    letter-spacing: 0.3px;
-    margin-bottom: 4px;
-    text-transform: uppercase;
-    font-size: 12px;
-    letter-spacing: 1px;
-  }
+    #compass-wrap.dragging {
+      cursor: grabbing;
+    }
 
-  .train-meta {
-    font-size: 11px;
-    color: var(--dim);
-    letter-spacing: 0.5px;
-  }
+    #compass-wrap canvas {
+      display: block;
+    }
 
-  .arriving-now {
-    font-family: 'Bebas Neue', sans-serif;
-    font-size: 13px;
-    letter-spacing: 2px;
-    color: var(--green);
-  }
+    #compass-hint {
+      text-align: center;
+      font-size: 8px;
+      letter-spacing: 0.12em;
+      color: rgba(237,232,223,0.25);
+      margin-top: 5px;
+      text-transform: uppercase;
+      transition: opacity 0.3s;
+    }
 
-  .divider {
-    height: 1px;
-    background: rgba(255,255,255,0.05);
-    margin: 4px 24px;
-  }
+    #compass-wrap:hover #compass-hint {
+      color: rgba(237,232,223,0.45);
+    }
 
-  .loading-state, .error-state {
-    padding: 48px 24px;
-    text-align: center;
-    color: var(--dim);
-    font-size: 13px;
-    letter-spacing: 1px;
-  }
+    /* ─── Controls bar (bottom center) ──────────────────────── */
+    #controls {
+      position: absolute;
+      bottom: 28px;
+      left: 50%;
+      transform: translateX(-50%);
+      pointer-events: all;
+      background: var(--glass);
+      border: 1px solid var(--glass-border);
+      backdrop-filter: blur(24px) saturate(1.2);
+      -webkit-backdrop-filter: blur(24px) saturate(1.2);
+      border-radius: 16px;
+      padding: 18px 28px;
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      white-space: nowrap;
+    }
 
-  .loading-state .spinner {
-    width: 32px;
-    height: 32px;
-    border: 2px solid rgba(255,255,255,0.1);
-    border-top-color: var(--c-blue-light);
-    border-radius: 50%;
-    animation: spin 0.8s linear infinite;
-    margin: 0 auto 16px;
-  }
+    .ctrl-group {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
 
-  .error-state {
-    color: var(--warn);
-  }
+    .ctrl-label {
+      font-size: 8.5px;
+      letter-spacing: 0.17em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
 
-  .no-trains {
-    padding: 24px;
-    text-align: center;
-    color: var(--dim);
-    font-size: 12px;
-    letter-spacing: 1px;
-  }
+    .ctrl-input {
+      background: rgba(255,255,255,0.055);
+      border: 1px solid var(--glass-border);
+      border-radius: 8px;
+      color: var(--text);
+      font-family: 'DM Mono', monospace;
+      font-size: 13px;
+      padding: 7px 12px;
+      outline: none;
+      cursor: pointer;
+      transition: border-color 0.2s, background 0.2s;
+      color-scheme: dark;
+    }
 
-  .alarm-btns {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    flex-shrink: 0;
-  }
+    .ctrl-input:hover { border-color: rgba(255,255,255,0.16); background: rgba(255,255,255,0.085); }
+    .ctrl-input:focus { border-color: rgba(255,255,255,0.22); }
 
-  .notify-btn {
-    background: none;
-    border: 1px solid rgba(255,255,255,0.15);
-    color: var(--dim);
-    border-radius: 7px;
-    padding: 6px 10px;
-    cursor: pointer;
-    font-family: 'DM Mono', monospace;
-    font-size: 10px;
-    letter-spacing: 0.5px;
-    line-height: 1;
-    transition: all 0.15s;
-    white-space: nowrap;
-  }
-  .notify-btn:hover {
-    border-color: var(--accent);
-    color: var(--accent);
-    background: rgba(91,140,255,0.08);
-  }
-  .notify-btn.armed {
-    border-color: var(--green);
-    color: var(--green);
-    background: rgba(74,222,128,0.08);
-    animation: armPulse 2s ease-in-out infinite;
-  }
-  .notify-btn.armed:hover {
-    border-color: #f87171;
-    color: #f87171;
-    background: rgba(248,113,113,0.08);
-    animation: none;
-  }
-  @keyframes armPulse { 0%,100% { opacity:1; } 50% { opacity:0.6; } }
+    .vr {
+      width: 1px;
+      height: 44px;
+      background: var(--glass-border);
+      flex-shrink: 0;
+    }
 
-  .toast {
-    position: fixed;
-    bottom: 24px;
-    left: 50%;
-    transform: translateX(-50%) translateY(80px);
-    background: var(--platform);
-    border: 1px solid rgba(255,255,255,0.12);
-    color: var(--text);
-    padding: 12px 20px;
-    border-radius: 10px;
-    font-size: 12px;
-    letter-spacing: 0.5px;
-    white-space: nowrap;
-    box-shadow: 0 8px 32px rgba(0,0,0,0.5);
-    transition: transform 0.3s ease;
-    z-index: 100;
-  }
-  .toast.show {
-    transform: translateX(-50%) translateY(0);
-  }
+    #locate-btn {
+      pointer-events: all;
+      background: rgba(255,255,255,0.055);
+      border: 1px solid var(--glass-border);
+      border-radius: 8px;
+      color: var(--text);
+      font-family: 'DM Mono', monospace;
+      font-size: 11px;
+      letter-spacing: 0.05em;
+      padding: 8px 14px;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: flex;
+      align-items: center;
+      gap: 7px;
+    }
 
-  .footer {
-    position: relative;
-    z-index: 1;
-    text-align: center;
-    padding: 12px 24px;
-    font-size: 10px;
-    color: var(--dim);
-    letter-spacing: 0.5px;
-    border-top: 1px solid rgba(255,255,255,0.05);
-  }
+    #locate-btn:hover {
+      background: rgba(255,255,255,0.1);
+      border-color: rgba(255,255,255,0.18);
+    }
 
-  .auto-refresh-bar {
-    height: 2px;
-    background: var(--c-blue);
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    z-index: 10;
-    transition: none;
-  }
-  .auto-refresh-bar.animating {
-    animation: countdown 30s linear;
-  }
-  @keyframes countdown { from { width: 100%; } to { width: 0%; } }
+    #locate-btn svg { flex-shrink: 0; }
 
-  /* night service note */
-  .service-note {
-    margin: 0 24px 12px;
-    padding: 10px 14px;
-    background: rgba(255, 179, 71, 0.08);
-    border: 1px solid rgba(255, 179, 71, 0.2);
-    border-radius: 8px;
-    font-size: 11px;
-    color: var(--warn);
-    letter-spacing: 0.5px;
-    line-height: 1.5;
-  }
-</style>
+    /* ─── Sun ray canvas overlay ─────────────────────────── */
+    #ray-canvas {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.8s;
+    }
+
+    /* ─── Map attribution override ───────────────────────── */
+    .maplibregl-ctrl-attrib {
+      font-size: 9px !important;
+      opacity: 0.4;
+    }
+
+    /* ─── Light Times Panel (left side) ─────────────────── */
+    #light-times {
+      position: absolute;
+      left: 24px;
+      bottom: 28px;
+      pointer-events: none;
+      background: var(--glass);
+      border: 1px solid var(--glass-border);
+      backdrop-filter: blur(24px) saturate(1.2);
+      -webkit-backdrop-filter: blur(24px) saturate(1.2);
+      border-radius: 13px;
+      padding: 16px 18px;
+      width: 220px;
+    }
+
+    #light-times .panel-label {
+      margin-bottom: 12px;
+    }
+
+    .lt-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 5px 0;
+    }
+
+    .lt-row + .lt-row {
+      border-top: 1px solid rgba(255,255,255,0.04);
+    }
+
+    .lt-swatch {
+      width: 26px;
+      height: 26px;
+      border-radius: 7px;
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+    }
+
+    .lt-info {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .lt-name {
+      font-size: 9px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 2px;
+    }
+
+    .lt-time {
+      font-size: 12.5px;
+      color: var(--text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .lt-time.active {
+      color: #f0bf55;
+      text-shadow: 0 0 12px rgba(232,160,32,0.4);
+    }
+
+    /* Day arc bar at bottom of panel */
+    #day-arc-wrap {
+      margin-top: 13px;
+      padding-top: 11px;
+      border-top: 1px solid rgba(255,255,255,0.06);
+    }
+
+    #day-arc-label {
+      font-size: 8px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 7px;
+    }
+
+    #day-arc-bar {
+      position: relative;
+      height: 8px;
+      border-radius: 4px;
+      background: rgba(255,255,255,0.05);
+      overflow: visible;
+    }
+
+    .arc-seg {
+      position: absolute;
+      top: 0; height: 100%;
+      border-radius: 4px;
+      transition: left 0.5s ease, width 0.5s ease;
+    }
+
+    #arc-cursor {
+      position: absolute;
+      top: -4px;
+      width: 3px;
+      height: 16px;
+      border-radius: 2px;
+      background: white;
+      box-shadow: 0 0 6px rgba(255,255,255,0.6);
+      transform: translateX(-50%);
+      transition: left 0.5s ease;
+      z-index: 2;
+    }
+
+    /* ─── Responsive ─────────────────────────────────────── */
+    @media (max-width: 600px) {
+      #controls { flex-wrap: wrap; gap: 14px; min-width: calc(100vw - 32px); justify-content: center; }
+      .vr { display: none; }
+      #solar-panel { display: none; }
+      #light-times { display: none; }
+    }
+  </style>
 </head>
 <body>
 
-<header class="header">
-  <div class="bullet">C</div>
-  <div class="header-text">
-    <h1>Clinton–Washington Avs</h1>
-    <p>IND Fulton Street Line · Brooklyn</p>
-  </div>
-  <button class="refresh-btn" id="refreshBtn" title="Refresh" onclick="refresh()">↻</button>
-</header>
+<div id="map"></div>
+<canvas id="ray-canvas"></canvas>
 
-<div class="status-bar">
-  <div>
-    <span class="status-dot" id="statusDot"></span>
-    <span id="statusText">Loading...</span>
+<div id="ui">
+
+  <!-- Header -->
+  <div id="header"><h1>SunSeeker</h1></div>
+
+  <!-- Phase badge -->
+  <div id="phase-badge">
+    <span class="badge-dot"></span>
+    <span class="badge-icon" id="badge-icon"></span>
+    <span id="badge-text"></span>
   </div>
-  <div id="lastUpdated"></div>
+
+  <!-- Solar info -->
+  <div id="solar-panel">
+    <div class="panel-label">Solar Position</div>
+    <div class="solar-row">
+      <span class="solar-key">Azimuth</span>
+      <span class="solar-val" id="v-azimuth">—</span>
+    </div>
+    <div class="solar-row">
+      <span class="solar-key">Altitude</span>
+      <span class="solar-val" id="v-altitude">—</span>
+    </div>
+    <div class="solar-row">
+      <span class="solar-key">Phase</span>
+      <span class="solar-val" id="v-phase">—</span>
+    </div>
+    <div class="sep"></div>
+    <div class="solar-row">
+      <span class="solar-key">Sunrise</span>
+      <span class="solar-val" id="v-sunrise">—</span>
+    </div>
+    <div class="solar-row">
+      <span class="solar-key">Sunset</span>
+      <span class="solar-val" id="v-sunset">—</span>
+    </div>
+    <div class="solar-row">
+      <span class="solar-key">Golden Hr</span>
+      <span class="solar-val" id="v-golden">—</span>
+    </div>
+  </div>
+
+  <!-- Compass -->
+  <div id="compass-wrap">
+    <canvas id="compass" width="110" height="110"></canvas>
+    <div id="compass-hint">drag to rotate</div>
+  </div>
+
+  <!-- Light Times Panel -->
+  <div id="light-times">
+    <div class="panel-label">Today's Light</div>
+
+    <div class="lt-row">
+      <div class="lt-swatch" style="background:rgba(255,170,80,0.12)">🌅</div>
+      <div class="lt-info">
+        <div class="lt-name">Sunrise</div>
+        <div class="lt-time" id="lt-sunrise">—</div>
+      </div>
+    </div>
+
+    <div class="lt-row">
+      <div class="lt-swatch" style="background:rgba(232,160,32,0.14)">✦</div>
+      <div class="lt-info">
+        <div class="lt-name">Morning Golden Hr</div>
+        <div class="lt-time" id="lt-golden-morn">—</div>
+      </div>
+    </div>
+
+    <div class="lt-row">
+      <div class="lt-swatch" style="background:rgba(91,159,245,0.12)">◑</div>
+      <div class="lt-info">
+        <div class="lt-name">Solar Noon</div>
+        <div class="lt-time" id="lt-noon">—</div>
+      </div>
+    </div>
+
+    <div class="lt-row">
+      <div class="lt-swatch" style="background:rgba(232,160,32,0.14)">✦</div>
+      <div class="lt-info">
+        <div class="lt-name">Evening Golden Hr</div>
+        <div class="lt-time" id="lt-golden-eve">—</div>
+      </div>
+    </div>
+
+    <div class="lt-row">
+      <div class="lt-swatch" style="background:rgba(100,100,180,0.14)">🌇</div>
+      <div class="lt-info">
+        <div class="lt-name">Sunset</div>
+        <div class="lt-time" id="lt-sunset">—</div>
+      </div>
+    </div>
+
+    <div id="day-arc-wrap">
+      <div id="day-arc-label">Daylight Span</div>
+      <div id="day-arc-bar">
+        <div class="arc-seg" id="arc-blue-morn"  style="background:rgba(91,159,245,0.55)"></div>
+        <div class="arc-seg" id="arc-golden-morn" style="background:rgba(232,160,32,0.75)"></div>
+        <div class="arc-seg" id="arc-day"         style="background:rgba(255,245,200,0.2)"></div>
+        <div class="arc-seg" id="arc-golden-eve"  style="background:rgba(232,160,32,0.75)"></div>
+        <div class="arc-seg" id="arc-blue-eve"    style="background:rgba(91,159,245,0.55)"></div>
+        <div id="arc-cursor"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Controls -->
+  <div id="controls">
+    <div class="ctrl-group">
+      <div class="ctrl-label">Date</div>
+      <input type="date" class="ctrl-input" id="inp-date">
+    </div>
+    <div class="vr"></div>
+    <div class="ctrl-group">
+      <div class="ctrl-label">Local Time</div>
+      <input type="time" class="ctrl-input" id="inp-time">
+    </div>
+    <div class="vr"></div>
+    <button id="locate-btn">
+      <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+        <circle cx="6" cy="6" r="2.2" fill="currentColor"/>
+        <path d="M6 1v1.5M6 9.5V11M1 6h1.5M9.5 6H11" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+        <circle cx="6" cy="6" r="4.5" stroke="currentColor" stroke-width="1" opacity="0.5"/>
+      </svg>
+      My Location
+    </button>
+  </div>
+
 </div>
 
-<main id="main">
-  <div class="loading-state">
-    <div class="spinner"></div>
-    Fetching arrivals...
-  </div>
-</main>
-
-<footer class="footer">
-  Live MTA data · Auto-refreshes every 30s
-</footer>
-
-<div class="auto-refresh-bar" id="progressBar"></div>
-<div class="toast" id="toast"></div>
-
 <script>
-const STOP_N = 'A27N';
-const STOP_S = 'A27S';
-const BASE   = 'https://otp-mta-prod.camsys-apps.com/otp/routers/default/index/stops';
-const LS_KEY = 'cTrain_alarms';
+window.addEventListener('load', function() {
+/* ═══════════════════════════════════════════════════════
+   STATE
+═══════════════════════════════════════════════════════ */
+let map;
+let lat = 40.7484, lng = -73.9967; // Default: Midtown NYC
+let lastSunData = null;
 
-let refreshTimer   = null;
-let pollTimer      = null;
+/* ═══════════════════════════════════════════════════════
+   DATE / TIME INIT
+═══════════════════════════════════════════════════════ */
+const pad = n => String(n).padStart(2, '0');
 
-// ── localStorage-backed alarm store ───────────────────────────────────────
-// Stored as: { [alarmId]: { fireAt, dest, direction, buffer, fired } }
-// alarmId = tripKey + '-relaxed' | '-rushed'
-// We never store timeoutIds — we use a poll loop instead, so alarms survive
-// refresh, tab-switch, and page reopen.
+function nowLocal() { return new Date(); }
 
-function loadAlarms() {
-  try {
-    const raw = localStorage.getItem(LS_KEY);
-    if (!raw) return {};
-    const all = JSON.parse(raw);
-    // Drop anything that already fired or is more than 2h old
-    const now = Date.now();
-    for (const [id, a] of Object.entries(all)) {
-      if (a.fired || a.fireAt < now - 120_000) delete all[id];
-    }
-    return all;
-  } catch { return {}; }
+function setInputsToNow() {
+  const d = nowLocal();
+  document.getElementById('inp-date').value =
+    `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+  document.getElementById('inp-time').value =
+    `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-function saveAlarms(alarms) {
-  try { localStorage.setItem(LS_KEY, JSON.stringify(alarms)); } catch {}
+setInputsToNow();
+
+function getSelectedDate() {
+  const dv = document.getElementById('inp-date').value;
+  const tv = document.getElementById('inp-time').value;
+  if (!dv || !tv) return nowLocal();
+  return new Date(`${dv}T${tv}:00`);
 }
 
-// Single live reference — kept in sync with localStorage
-let alarms = loadAlarms();
+/* ═══════════════════════════════════════════════════════
+   MAP INIT
+═══════════════════════════════════════════════════════ */
+map = new maplibregl.Map({
+  container: 'map',
+  style: 'https://tiles.openfreemap.org/styles/liberty',
+  center: [lng, lat],
+  zoom: 16,
+  pitch: 52,
+  bearing: -20,
+  antialias: true,
+  attributionControl: true
+});
 
-// ── Toast ──────────────────────────────────────────────────────────────────
-function showToast(msg, duration = 3500) {
-  const t = document.getElementById('toast');
-  t.textContent = msg;
-  t.classList.add('show');
-  clearTimeout(t._h);
-  t._h = setTimeout(() => t.classList.remove('show'), duration);
-}
+map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'bottom-left');
 
-// ── Notification ───────────────────────────────────────────────────────────
-async function requestNotifPermission() {
-  if (!('Notification' in window)) return false;
-  if (Notification.permission === 'granted') return true;
-  const r = await Notification.requestPermission();
-  return r === 'granted';
-}
+map.on('load', () => {
+  tryAdd3DBuildings();
+  updateAll();
+  // Keep lat/lng in sync
+  map.on('moveend', () => {
+    const c = map.getCenter();
+    lat = c.lat; lng = c.lng;
+    updateAll();
+  });
+});
 
-function fireNotif(alarm) {
-  const { dest, direction, buffer } = alarm;
-  const body = `C → ${dest} (${direction}) leaves in ${buffer} min`;
-  if (Notification.permission === 'granted') {
-    try {
-      new Notification('🚇 Leave now!', { body, requireInteraction: true });
-    } catch(e) { console.warn('Notification failed:', e); }
+function tryAdd3DBuildings() {
+  const style = map.getStyle();
+  const layers = style.layers || [];
+
+  // Find first symbol layer (insert buildings below labels)
+  let beforeId;
+  for (const l of layers) {
+    if (l.type === 'symbol') { beforeId = l.id; break; }
   }
-  showToast(`🚶 ${body}`, 12000);
-}
 
-// ── Poll loop — checks every 15s whether any alarm is due ─────────────────
-// This is what actually fires the notification. Because it runs on a repeating
-// timer rather than a one-shot setTimeout, it is robust to the page being
-// refreshed mid-wait — alarms reload from localStorage and keep firing.
-function startPollLoop() {
-  clearInterval(pollTimer);
-  pollTimer = setInterval(() => {
-    const now = Date.now();
-    let changed = false;
-    for (const [id, alarm] of Object.entries(alarms)) {
-      if (!alarm.fired && alarm.fireAt <= now) {
-        alarm.fired = true;
-        changed = true;
-        fireNotif(alarm);
-        // Unarmed the button if it's visible
-        setButtonState(id, false);
+  // Remove any existing 3d-buildings layer we added
+  if (map.getLayer('ss-buildings')) map.removeLayer('ss-buildings');
+
+  // Detect the source name used for vector tiles
+  const sources = Object.keys(style.sources || {});
+  const vectorSource = sources.find(s => {
+    const src = style.sources[s];
+    return src.type === 'vector';
+  });
+
+  if (!vectorSource) return; // Raster-only style, skip
+
+  try {
+    map.addLayer({
+      id: 'ss-buildings',
+      type: 'fill-extrusion',
+      source: vectorSource,
+      'source-layer': 'building',
+      minzoom: 14,
+      paint: {
+        'fill-extrusion-color': [
+          'interpolate', ['linear'], ['zoom'],
+          14, '#1e1e22',
+          17, '#2a2a30'
+        ],
+        'fill-extrusion-height': [
+          'coalesce', ['get', 'render_height'], ['get', 'height'], 5
+        ],
+        'fill-extrusion-base': [
+          'coalesce', ['get', 'render_min_height'], ['get', 'min_height'], 0
+        ],
+        'fill-extrusion-opacity': 0.88
       }
-    }
-    if (changed) saveAlarms(alarms);
-  }, 15_000);
-}
-
-// ── Button helpers ─────────────────────────────────────────────────────────
-function btnLabel(id) {
-  return id.endsWith('relaxed') ? 'Relaxed (7 min)' : 'Rushed (4 min)';
-}
-
-function setButtonState(id, armed) {
-  const btn = document.getElementById(`btn-${id}`);
-  if (!btn) return;
-  btn.textContent = armed ? `✓ ${btnLabel(id)}` : btnLabel(id);
-  btn.classList.toggle('armed', armed);
-  btn.title = armed ? 'Tap to cancel' : 'Alert me when to leave';
-}
-
-function restoreButtons() {
-  for (const [id, alarm] of Object.entries(alarms)) {
-    if (!alarm.fired) setButtonState(id, true);
+    }, beforeId);
+  } catch(e) {
+    // Try common alternative source-layer names
+    try {
+      map.addLayer({
+        id: 'ss-buildings',
+        type: 'fill-extrusion',
+        source: vectorSource,
+        'source-layer': 'buildings',
+        minzoom: 14,
+        paint: {
+          'fill-extrusion-color': '#202028',
+          'fill-extrusion-height': ['coalesce', ['get', 'height'], 5],
+          'fill-extrusion-base': ['coalesce', ['get', 'min_height'], 0],
+          'fill-extrusion-opacity': 0.85
+        }
+      }, beforeId);
+    } catch(e2) { /* style may handle buildings natively */ }
   }
 }
 
-// ── Click handler ──────────────────────────────────────────────────────────
-async function handleNotifyClick(alarmId, epochSeconds, dest, direction, buffer) {
-  // Cancel if already armed
-  if (alarms[alarmId] && !alarms[alarmId].fired) {
-    delete alarms[alarmId];
-    saveAlarms(alarms);
-    setButtonState(alarmId, false);
-    showToast('Alarm cancelled');
-    return;
+/* ═══════════════════════════════════════════════════════
+   SUN PHASE LOGIC
+═══════════════════════════════════════════════════════ */
+function getSunPhase(altDeg) {
+  if (altDeg < -18) return {
+    name: 'Night', abbr: 'Night', color: '#202040',
+    lightColor: '#0a0a18', lightInt: 0.1, badge: null
+  };
+  if (altDeg < -12) return {
+    name: 'Astronomical Twilight', abbr: 'Astro Twilight', color: '#1e2045',
+    lightColor: '#10103a', lightInt: 0.15, badge: null
+  };
+  if (altDeg < -6) return {
+    name: 'Nautical Twilight', abbr: 'Nautical Twil.', color: '#252660',
+    lightColor: '#181858', lightInt: 0.2, badge: null
+  };
+  if (altDeg < -4) return {
+    name: 'Civil Twilight', abbr: 'Civil Twilight', color: '#4a3090',
+    lightColor: '#2a1a60', lightInt: 0.25, badge: 'civil', icon: '🌆'
+  };
+  if (altDeg < 0) return {
+    name: 'Blue Hour', abbr: 'Blue Hour', color: '#4a80e0',
+    lightColor: '#3060c0', lightInt: 0.4, badge: 'blue', icon: '🔵'
+  };
+  if (altDeg < 6) return {
+    name: 'Golden Hour', abbr: 'Golden Hour', color: '#e8a020',
+    lightColor: '#d07010', lightInt: 0.72, badge: 'golden', icon: '✦'
+  };
+  if (altDeg < 20) return {
+    name: 'Low Sun', abbr: 'Low Sun', color: '#d4a855',
+    lightColor: '#c09040', lightInt: 0.6, badge: null
+  };
+  if (altDeg < 45) return {
+    name: 'Daytime', abbr: 'Daytime', color: '#f5efdf',
+    lightColor: '#f0e8d0', lightInt: 0.5, badge: null
+  };
+  return {
+    name: 'High Sun', abbr: 'High Sun', color: '#ffffff',
+    lightColor: '#ffffff', lightInt: 0.45, badge: null
+  };
+}
+
+function fmtTime(d) {
+  if (!d || isNaN(d.getTime())) return '—';
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function azToCardinal(deg) {
+  const dirs = ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'];
+  return dirs[Math.round(((deg % 360) + 360) % 360 / 22.5) % 16];
+}
+
+/* ═══════════════════════════════════════════════════════
+   MAIN UPDATE
+═══════════════════════════════════════════════════════ */
+function updateAll() {
+  const date = getSelectedDate();
+  const pos = SunCalc.getPosition(date, lat, lng);
+  const times = SunCalc.getTimes(date, lat, lng);
+
+  const altDeg = pos.altitude * 180 / Math.PI;
+  // SunCalc azimuth: measured from south, going west-negative / east-positive
+  // Convert to compass bearing: 0=N, 90=E, 180=S, 270=W
+  const azDeg = ((pos.azimuth * 180 / Math.PI) + 180 + 360) % 360;
+
+  const phase = getSunPhase(altDeg);
+  lastSunData = { altDeg, azDeg, phase, times, date };
+
+  updateLightTimes(times, date);
+  updateInfoPanel(altDeg, azDeg, phase, times);
+  updateBadge(phase);
+  updateMapLight(altDeg, azDeg, phase);
+  drawCompass(azDeg, altDeg, phase);
+  drawRayOverlay(azDeg, altDeg, phase);
+}
+
+/* ═══════════════════════════════════════════════════════
+   LIGHT TIMES PANEL
+═══════════════════════════════════════════════════════ */
+function updateLightTimes(times, date) {
+  const ghMornStart = times.dawn;          // civil dawn ~ blue hour start
+  const ghMornEnd   = times.goldenHourEnd; // golden hour ends in morning
+  const ghEveStart  = times.goldenHour;    // golden hour starts in evening
+  const ghEveEnd    = times.dusk;          // civil dusk ~ blue hour end
+
+  const fmtRange = (a, b) => {
+    if (!a || !b || isNaN(a.getTime()) || isNaN(b.getTime())) return '—';
+    return fmtTime(a) + ' – ' + fmtTime(b);
+  };
+
+  document.getElementById('lt-sunrise').textContent = fmtTime(times.sunrise);
+  document.getElementById('lt-golden-morn').textContent = fmtRange(times.sunriseEnd, times.goldenHourEnd);
+  document.getElementById('lt-noon').textContent = fmtTime(times.solarNoon);
+  document.getElementById('lt-golden-eve').textContent = fmtRange(times.goldenHour, times.sunsetStart);
+  document.getElementById('lt-sunset').textContent = fmtTime(times.sunset);
+
+  // Highlight currently active row
+  const now = date;
+  const inGoldenMorn = now >= times.sunriseEnd && now <= times.goldenHourEnd;
+  const inGoldenEve  = now >= times.goldenHour  && now <= times.sunsetStart;
+  document.getElementById('lt-golden-morn').className = 'lt-time' + (inGoldenMorn ? ' active' : '');
+  document.getElementById('lt-golden-eve').className  = 'lt-time' + (inGoldenEve  ? ' active' : '');
+
+  // ── Day arc bar ──────────────────────────────────────────
+  // Span the bar from civil dawn to civil dusk
+  const dayStart = ghMornStart && !isNaN(ghMornStart) ? ghMornStart : times.sunrise;
+  const dayEnd   = ghEveEnd    && !isNaN(ghEveEnd)    ? ghEveEnd   : times.sunset;
+  if (!dayStart || !dayEnd || isNaN(dayStart) || isNaN(dayEnd)) return;
+
+  const span = dayEnd - dayStart;
+  const pct = t => {
+    if (!t || isNaN(t.getTime())) return null;
+    return Math.max(0, Math.min(100, (t - dayStart) / span * 100));
+  };
+
+  const seg = (id, from, to) => {
+    const el = document.getElementById(id);
+    const f = pct(from), t = pct(to);
+    if (f === null || t === null) { el.style.display = 'none'; return; }
+    el.style.display = '';
+    el.style.left  = f + '%';
+    el.style.width = Math.max(0, t - f) + '%';
+  };
+
+  seg('arc-blue-morn',   times.dawn,        times.sunrise);
+  seg('arc-golden-morn', times.sunriseEnd,   times.goldenHourEnd);
+  seg('arc-day',         times.goldenHourEnd, times.goldenHour);
+  seg('arc-golden-eve',  times.goldenHour,   times.sunsetStart);
+  seg('arc-blue-eve',    times.sunset,       times.dusk);
+
+  // Cursor = current time position
+  const cursorPct = pct(now);
+  const cursor = document.getElementById('arc-cursor');
+  if (cursorPct !== null) {
+    cursor.style.display = '';
+    cursor.style.left = cursorPct + '%';
+  } else {
+    cursor.style.display = 'none';
   }
+}
 
-  const ok = await requestNotifPermission();
-  if (!ok) {
-    showToast('Please enable notifications in browser settings');
-    return;
+/* ═══════════════════════════════════════════════════════
+   INFO PANEL
+═══════════════════════════════════════════════════════ */
+function updateInfoPanel(altDeg, azDeg, phase, times) {
+  document.getElementById('v-azimuth').textContent =
+    `${azDeg.toFixed(1)}° ${azToCardinal(azDeg)}`;
+  document.getElementById('v-altitude').textContent =
+    `${altDeg.toFixed(1)}°`;
+
+  const phaseEl = document.getElementById('v-phase');
+  phaseEl.textContent = phase.abbr;
+  phaseEl.style.color = phase.color;
+
+  document.getElementById('v-sunrise').textContent = fmtTime(times.sunrise);
+  document.getElementById('v-sunset').textContent = fmtTime(times.sunset);
+
+  // Golden hour windows
+  const ghMorn = times.goldenHourEnd;
+  const ghEve = times.goldenHour;
+  let ghStr = '—';
+  if (ghMorn && ghEve && !isNaN(ghMorn) && !isNaN(ghEve)) {
+    ghStr = `${fmtTime(times.goldenHourEnd)} & ${fmtTime(times.goldenHour)}`;
   }
+  document.getElementById('v-golden').textContent = ghStr;
+}
 
-  const fireAt = (epochSeconds - buffer * 60) * 1000;
-  if (fireAt <= Date.now()) {
-    showToast('Not enough time — catch the next one');
-    return;
+/* ═══════════════════════════════════════════════════════
+   BADGE
+═══════════════════════════════════════════════════════ */
+function updateBadge(phase) {
+  const badge = document.getElementById('phase-badge');
+  badge.className = '';
+  if (phase.badge) {
+    badge.className = `visible ${phase.badge}`;
+    document.getElementById('badge-icon').textContent = phase.icon;
+    document.getElementById('badge-text').textContent = phase.name;
   }
-
-  alarms[alarmId] = { fireAt, dest, direction, buffer, fired: false };
-  saveAlarms(alarms);
-  setButtonState(alarmId, true);
-
-  const leaveStr = new Date(fireAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
-  showToast(`⏰ Alert set for ${leaveStr}`);
 }
 
-// ── Stable trip key ────────────────────────────────────────────────────────
-// The OTP API nests the trip under arrival.pattern.id or arrival.trip.id —
-// we try both, then fall back to scheduled-minute which is still stable
-// within a single service day even if it drifts a second or two.
-function tripKey(arrival, direction) {
-  const raw =
-    (arrival.trip && arrival.trip.id)          ? arrival.trip.id :
-    (arrival.pattern && arrival.pattern.id)    ? arrival.pattern.id :
-    arrival.tripId                             ? arrival.tripId :
-    `${direction}-sched-${arrival.scheduledDeparture || Math.floor((arrival.serviceDay + (arrival.scheduledDeparture || arrival.realtimeDeparture)) / 60)}`;
-  return raw.replace(/[^a-zA-Z0-9_-]/g, '_');
-}
+/* ═══════════════════════════════════════════════════════
+   MAP LIGHT
+═══════════════════════════════════════════════════════ */
+function updateMapLight(altDeg, azDeg, phase) {
+  if (!map.isStyleLoaded()) return;
 
-// ── Data fetching ──────────────────────────────────────────────────────────
-async function fetchArrivals(stopId) {
-  const url = `${BASE}/MTASBWY:${stopId}/stoptimes?timeRange=3600&numberOfDepartures=5`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const data = await res.json();
-  // Log one entry so we can see the real shape in devtools
-  if (data[0]?.times?.[0]) console.debug('[C train] sample arrival:', JSON.stringify(data[0].times[0]));
-  return data;
-}
-
-function minutesUntil(epoch) {
-  return Math.round((epoch - Date.now() / 1000) / 60);
-}
-
-function formatTime(epoch) {
-  return new Date(epoch * 1000).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
-}
-
-// ── Rendering ──────────────────────────────────────────────────────────────
-function renderCard(arrival, idx, direction) {
-  const epoch = arrival.serviceDay + arrival.realtimeDeparture;
-  const mins  = minutesUntil(epoch);
-  if (mins < -1) return '';
-
-  const dest    = arrival.headsign || 'C Train';
-  const absTime = formatTime(epoch);
-  const isLive  = arrival.realtime;
-  const key     = tripKey(arrival, direction);
-  const idR     = `${key}-relaxed`;
-  const idS     = `${key}-rushed`;
-  const destSafe = dest.replace(/'/g, "\\'");
-
-  function alarmBtn(id, label, buffer) {
-    const armed = !!(alarms[id] && !alarms[id].fired);
-    return `<button
-      class="notify-btn${armed ? ' armed' : ''}"
-      id="btn-${id}"
-      title="${armed ? 'Tap to cancel' : `Alert me ${buffer} min before`}"
-      onclick="handleNotifyClick('${id}',${epoch},'${destSafe}','${direction}',${buffer})"
-    >${armed ? '✓ ' : ''}${label}</button>`;
-  }
-
-  const buttons = `<div class="alarm-btns">
-    ${alarmBtn(idR, 'Relaxed (7 min)', 7)}
-    ${alarmBtn(idS, 'Rushed (4 min)',  4)}
-  </div>`;
-
-  const timeBlock = mins <= 0
-    ? `<div><div class="arriving-now">NOW</div><div class="train-time-unit">arriving</div></div>`
-    : `<div><div class="train-time${mins <= 2 ? ' urgent' : ''}">${mins}</div><div class="train-time-unit">min</div></div>`;
-
-  return `<div class="train-card" style="animation-delay:${idx * 0.05}s">
-    ${timeBlock}
-    <div class="train-info">
-      <div class="train-dest">${dest}</div>
-      <div class="train-meta">${absTime} · ${isLive ? '🟢 live' : '📅 sched'}</div>
-    </div>
-    ${buttons}
-  </div>`;
-}
-
-function renderSection(label, arrivals, direction) {
-  const now = Date.now() / 1000;
-  const upcoming = arrivals
-    .filter(a => (a.serviceDay + a.realtimeDeparture) - now > -60)
-    .slice(0, 4);
-  const cards = upcoming.map((a, i) => renderCard(a, i, direction)).filter(Boolean).join('');
-  return `<div class="direction-section">
-    <div class="direction-label">${label}</div>
-    ${cards || '<div class="no-trains">No upcoming trains</div>'}
-  </div>`;
-}
-
-// ── Load ───────────────────────────────────────────────────────────────────
-async function load() {
-  const main       = document.getElementById('main');
-  const dot        = document.getElementById('statusDot');
-  const statusText = document.getElementById('statusText');
-  const lastUpd    = document.getElementById('lastUpdated');
-
-  // Freshen alarm state from localStorage before each render
-  alarms = loadAlarms();
+  // MapLibre light position: [radial, azimuthal_from_N_CW, polar_from_zenith]
+  const polar = Math.max(1, Math.min(89, 90 - altDeg));
 
   try {
-    const [northData, southData] = await Promise.all([
-      fetchArrivals(STOP_N), fetchArrivals(STOP_S)
-    ]);
-    const sort = arr => arr.sort((a, b) =>
-      (a.serviceDay + a.realtimeDeparture) - (b.serviceDay + b.realtimeDeparture));
+    map.setLight({
+      anchor: 'map',
+      color: phase.lightColor,
+      intensity: phase.lightInt,
+      position: [1.5, azDeg, polar]
+    });
+  } catch(e) {}
+}
 
-    const northArrivals = sort(northData.flatMap(p => p.times || []));
-    const southArrivals = sort(southData.flatMap(p => p.times || []));
+/* ═══════════════════════════════════════════════════════
+   COMPASS CANVAS
+═══════════════════════════════════════════════════════ */
+function drawCompass(azDeg, altDeg, phase) {
+  const canvas = document.getElementById('compass');
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  const cx = W / 2, cy = H / 2;
+  const R = cx - 6;
+  const bearing = map.getBearing(); // current map rotation
 
-    const h = new Date().getHours();
-    const nightNote = (h >= 0 && h < 5)
-      ? `<div class="service-note">🌙 Late night: C suspended — A train running instead</div>` : '';
+  ctx.clearRect(0, 0, W, H);
 
-    main.innerHTML = nightNote
-      + renderSection('↑ Uptown · Manhattan', northArrivals, 'Uptown')
-      + '<div class="divider"></div>'
-      + renderSection('↓ Brooklyn · Euclid Av', southArrivals, 'Downtown');
+  // BG circle
+  ctx.beginPath();
+  ctx.arc(cx, cy, R, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(10,10,12,0.72)';
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+  ctx.lineWidth = 1;
+  ctx.stroke();
 
-    dot.className          = 'status-dot live';
-    statusText.textContent = 'Live';
-    lastUpd.textContent    = 'Updated ' + new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
-
-  } catch (err) {
-    console.error(err);
-    dot.className          = 'status-dot';
-    statusText.textContent = 'Error';
-    main.innerHTML = `<div class="error-state">⚠ Could not load arrivals<br><br>
-      <span style="font-size:11px;color:var(--dim)">Check connection or try refreshing.</span></div>`;
+  // Tick marks — rotated by bearing so N tracks true north
+  for (let i = 0; i < 36; i++) {
+    const a = (i / 36) * Math.PI * 2 - Math.PI / 2 - bearing * Math.PI / 180;
+    const isMain = i % 9 === 0;
+    const r0 = R - (isMain ? 8 : 4);
+    ctx.beginPath();
+    ctx.moveTo(cx + R * Math.cos(a), cy + R * Math.sin(a));
+    ctx.lineTo(cx + r0 * Math.cos(a), cy + r0 * Math.sin(a));
+    ctx.strokeStyle = isMain ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.08)';
+    ctx.lineWidth = isMain ? 1.5 : 0.8;
+    ctx.stroke();
   }
+
+  // Cardinal labels — also rotated
+  ctx.font = '9px "DM Mono"';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  [['N', 0], ['E', 90], ['S', 180], ['W', 270]].forEach(([l, deg]) => {
+    const a = (deg - 90 - bearing) * Math.PI / 180;
+    ctx.fillStyle = l === 'N' ? 'rgba(220,80,80,0.9)' : 'rgba(255,255,255,0.35)';
+    ctx.fillText(l, cx + (R - 16) * Math.cos(a), cy + (R - 16) * Math.sin(a));
+  });
+
+  // Sun beam gradient — sun position in compass space accounts for bearing
+  const sunRad = (azDeg - bearing - 90) * Math.PI / 180;
+  const beamLen = R - 24;
+  const sunX = cx + beamLen * Math.cos(sunRad);
+  const sunY = cy + beamLen * Math.sin(sunRad);
+
+  if (altDeg > -18) {
+    // Glow halo
+    const grd = ctx.createRadialGradient(sunX, sunY, 0, sunX, sunY, 18);
+    grd.addColorStop(0, phase.color + 'aa');
+    grd.addColorStop(1, 'transparent');
+    ctx.beginPath();
+    ctx.arc(sunX, sunY, 18, 0, Math.PI * 2);
+    ctx.fillStyle = grd;
+    ctx.fill();
+
+    // Ray line
+    const lineGrd = ctx.createLinearGradient(cx, cy, sunX, sunY);
+    lineGrd.addColorStop(0, 'transparent');
+    lineGrd.addColorStop(1, phase.color + 'cc');
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(sunX, sunY);
+    ctx.strokeStyle = lineGrd;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // Sun dot
+    ctx.beginPath();
+    ctx.arc(sunX, sunY, altDeg < 0 ? 3.5 : 5, 0, Math.PI * 2);
+    ctx.fillStyle = altDeg < 0 ? phase.color + '80' : phase.color;
+    ctx.fill();
+  }
+
+  // Altitude arc (shows sun height)
+  const altNorm = Math.max(0, Math.min(1, (altDeg + 18) / 106));
+  const arcStart = Math.PI * 1.1;
+  const arcEnd   = Math.PI * 1.9;
+  const arcSpan  = arcEnd - arcStart;
+
+  ctx.beginPath();
+  ctx.arc(cx, cy, R - 3, arcStart, arcEnd);
+  ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+  ctx.lineWidth = 3;
+  ctx.lineCap = 'round';
+  ctx.stroke();
+
+  if (altNorm > 0) {
+    ctx.beginPath();
+    ctx.arc(cx, cy, R - 3, arcStart, arcStart + arcSpan * altNorm);
+    ctx.strokeStyle = phase.color;
+    ctx.lineWidth = 3;
+    ctx.stroke();
+  }
+
+  // Center
+  ctx.beginPath();
+  ctx.arc(cx, cy, 3, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(237,232,223,0.45)';
+  ctx.fill();
 }
 
-function startCountdown() {
-  const bar = document.getElementById('progressBar');
-  bar.className = 'auto-refresh-bar';
-  void bar.offsetWidth;
-  bar.className = 'auto-refresh-bar animating';
+/* ═══════════════════════════════════════════════════════
+   DIRECTIONAL SUN RAY OVERLAY
+   A soft gradient bloom showing where sunlight enters the scene
+═══════════════════════════════════════════════════════ */
+function drawRayOverlay(azDeg, altDeg, phase) {
+  const canvas = document.getElementById('ray-canvas');
+  const W = window.innerWidth, H = window.innerHeight;
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, W, H);
+
+  if (altDeg < -12) {
+    canvas.style.opacity = '0';
+    return;
+  }
+
+  const intensity = Math.max(0, Math.min(0.18, (altDeg + 12) / 60 * 0.18));
+  canvas.style.opacity = String(intensity / 0.18);
+
+  // Sun direction: azDeg is clockwise from north
+  // On screen: 0=N=top, 90=E=right, 180=S=bottom, 270=W=left
+  // Map bearing can rotate this, but we simplify to map-north = screen-top
+  const screenAngle = ((azDeg - map.getBearing()) % 360 + 360) % 360;
+  const rad = (screenAngle - 90) * Math.PI / 180;
+
+  // Source point on screen edge, opposite to sun direction (light comes FROM sun)
+  const cx = W / 2, cy = H / 2;
+  const dist = Math.max(W, H);
+  const srcX = cx - Math.cos(rad) * dist * 0.9;
+  const srcY = cy - Math.sin(rad) * dist * 0.9;
+
+  const grd = ctx.createRadialGradient(srcX, srcY, 0, srcX, srcY, dist * 1.1);
+  grd.addColorStop(0, phase.color + '28');
+  grd.addColorStop(0.4, phase.color + '0a');
+  grd.addColorStop(1, 'transparent');
+
+  ctx.fillStyle = grd;
+  ctx.fillRect(0, 0, W, H);
 }
 
-function refresh() {
-  const btn = document.getElementById('refreshBtn');
-  btn.classList.add('spinning');
-  setTimeout(() => btn.classList.remove('spinning'), 700);
-  clearTimeout(refreshTimer);
-  load().then(() => { startCountdown(); scheduleRefresh(); });
-}
+/* ═══════════════════════════════════════════════════════
+   EVENTS
+═══════════════════════════════════════════════════════ */
+document.getElementById('inp-date').addEventListener('input', updateAll);
+document.getElementById('inp-time').addEventListener('input', updateAll);
 
-function scheduleRefresh() {
-  refreshTimer = setTimeout(() => {
-    load().then(() => { startCountdown(); scheduleRefresh(); });
-  }, 30000);
-}
+map.on('rotate', () => {
+  if (lastSunData) {
+    drawCompass(lastSunData.azDeg, lastSunData.altDeg, lastSunData.phase);
+    drawRayOverlay(lastSunData.azDeg, lastSunData.altDeg, lastSunData.phase);
+  }
+});
 
-// ── Init ───────────────────────────────────────────────────────────────────
-load().then(() => { startCountdown(); scheduleRefresh(); });
-startPollLoop();
+/* ── Compass drag-to-rotate ─────────────────────────── */
+(function() {
+  const wrap = document.getElementById('compass-wrap');
+  const canvas = document.getElementById('compass');
+  let dragging = false;
+  let lastAngle = null;
+
+  function getAngle(e, rect) {
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+    const dx = clientX - (rect.left + rect.width / 2);
+    const dy = clientY - (rect.top + rect.height / 2);
+    return Math.atan2(dy, dx) * 180 / Math.PI;
+  }
+
+  function onStart(e) {
+    e.preventDefault();
+    dragging = true;
+    wrap.classList.add('dragging');
+    lastAngle = getAngle(e, canvas.getBoundingClientRect());
+  }
+
+  function onMove(e) {
+    if (!dragging) return;
+    e.preventDefault();
+    const angle = getAngle(e, canvas.getBoundingClientRect());
+    let delta = angle - lastAngle;
+    // Normalize to [-180, 180]
+    if (delta > 180)  delta -= 360;
+    if (delta < -180) delta += 360;
+    lastAngle = angle;
+    map.setBearing(map.getBearing() + delta);
+  }
+
+  function onEnd() {
+    dragging = false;
+    wrap.classList.remove('dragging');
+    lastAngle = null;
+  }
+
+  canvas.addEventListener('mousedown',  onStart, { passive: false });
+  canvas.addEventListener('touchstart', onStart, { passive: false });
+  window.addEventListener('mousemove',  onMove,  { passive: false });
+  window.addEventListener('touchmove',  onMove,  { passive: false });
+  window.addEventListener('mouseup',   onEnd);
+  window.addEventListener('touchend',  onEnd);
+
+  // Double-click to reset north
+  canvas.addEventListener('dblclick', () => {
+    map.easeTo({ bearing: 0, duration: 400 });
+  });
+})();
+
+document.getElementById('locate-btn').addEventListener('click', () => {
+  if (!navigator.geolocation) return;
+  navigator.geolocation.getCurrentPosition(pos => {
+    lat = pos.coords.latitude;
+    lng = pos.coords.longitude;
+    map.flyTo({ center: [lng, lat], zoom: 16, duration: 1800 });
+    setTimeout(updateAll, 200);
+  }, () => {
+    alert('Location access denied or unavailable.');
+  });
+});
+
+// Redraw overlay on resize
+window.addEventListener('resize', () => {
+  if (lastSunData) drawRayOverlay(lastSunData.azDeg, lastSunData.altDeg, lastSunData.phase);
+});
+
+// Auto-tick every 60s if user hasn't changed time
+let autoTick = true;
+document.getElementById('inp-time').addEventListener('change', () => { autoTick = false; });
+setInterval(() => {
+  if (autoTick) { setInputsToNow(); updateAll(); }
+}, 60000);
+
+}); // end window load
 </script>
 </body>
 </html>
